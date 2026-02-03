@@ -1,64 +1,48 @@
 import * as vscode from 'vscode';
 import { CursorDB } from './cursor/cursorDB';
+import { AIContextHoverProvider } from './providers/hoverProvider';
 
 export async function activate(context: vscode.ExtensionContext) {
-  console.log('[AI Context Tracker] POC - Activating extension...');
+  console.log('[AI Context Tracker] POC Day 3 - Activating extension...');
 
   try {
-    const cursorDB = new CursorDB();
+    console.log('[POC Day 3] Step 1: Registering Hover Provider...');
+    const hoverProvider = new AIContextHoverProvider();
     
-    console.log('[POC] Step 1: Initializing Cursor DB...');
+    const hoverDisposable = vscode.languages.registerHoverProvider(
+      { scheme: 'file', pattern: '**/*.ts' },
+      hoverProvider
+    );
+    
+    context.subscriptions.push(hoverDisposable);
+    console.log('[POC Day 3] ✅ Hover Provider registered for TypeScript files');
+
+    console.log('[POC Day 3] Step 2: Testing Cursor DB (from Day 1-2)...');
+    const cursorDB = new CursorDB();
     await cursorDB.initialize();
-    console.log(`[POC] ✅ DB Path: ${cursorDB.getDbPath()}`);
-
-    console.log('[POC] Step 2: Reading composers...');
     const composers = await cursorDB.getAllComposers();
-    console.log(`[POC] ✅ Found ${composers.length} composers`);
-
-    if (composers.length > 0) {
-      const latestComposer = composers[composers.length - 1];
-      console.log(`[POC] Latest composer: ${latestComposer.composerId}`);
-
-      console.log('[POC] Step 3: Reading bubbles...');
-      const bubbles = await cursorDB.getBubblesForComposer(latestComposer.composerId);
-      console.log(`[POC] ✅ Found ${bubbles.length} bubbles`);
-
-      if (bubbles.length > 0) {
-        console.log('[POC] Step 4: Sample bubble data:');
-        const sampleBubble = bubbles[0];
-        console.log(`[POC]   - Type: ${sampleBubble.type}`);
-        console.log(`[POC]   - Text (first 100 chars): ${sampleBubble.text.substring(0, 100)}...`);
-        console.log(`[POC]   - Created: ${new Date(sampleBubble.createdAt).toISOString()}`);
-      }
-
-      console.log('[POC] Step 5: Getting latest AI bubble...');
-      const latestAIBubble = await cursorDB.getLatestAIBubble();
-      if (latestAIBubble) {
-        console.log(`[POC] ✅ Latest AI response found`);
-        console.log(`[POC]   - Bubble ID: ${latestAIBubble.bubbleId}`);
-        console.log(`[POC]   - Text (first 200 chars): ${latestAIBubble.text.substring(0, 200)}...`);
-      } else {
-        console.log('[POC] ℹ️ No AI bubbles found');
-      }
-    }
-
     cursorDB.close();
+    console.log(`[POC Day 3] ✅ Cursor DB still works: ${composers.length} composers`);
 
     vscode.window.showInformationMessage(
-      `[POC] ✅ Cursor DB 접근 검증 완료! Composers: ${composers.length}개`
+      `[POC Day 3] ✅ Hover Provider 등록 완료! src/cursor/cursorDB.ts 파일을 열어서 코드에 마우스를 올려보세요.`
     );
 
-    console.log('[POC] ========================================');
-    console.log('[POC] Day 1-2 완료: Cursor DB 접근 검증 성공');
-    console.log('[POC] ========================================');
+    console.log('[POC Day 3] ========================================');
+    console.log('[POC Day 3] Hover Provider 테스트 준비 완료');
+    console.log('[POC Day 3] 📝 다음 작업:');
+    console.log('[POC Day 3]   1. src/cursor/cursorDB.ts 파일 열기');
+    console.log('[POC Day 3]   2. 1-10줄, 15-30줄, 50-80줄에 마우스 올리기');
+    console.log('[POC Day 3]   3. AI 생성 컨텍스트 Hover 확인');
+    console.log('[POC Day 3] ========================================');
 
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error('[POC] ❌ Error:', errorMsg);
-    vscode.window.showErrorMessage(`[POC] Cursor DB 접근 실패: ${errorMsg}`);
+    console.error('[POC Day 3] ❌ Error:', errorMsg);
+    vscode.window.showErrorMessage(`[POC Day 3] 오류 발생: ${errorMsg}`);
   }
 }
 
 export function deactivate() {
-  console.log('[AI Context Tracker] POC - Deactivating extension');
+  console.log('[AI Context Tracker] POC Day 3 - Deactivating extension');
 }
