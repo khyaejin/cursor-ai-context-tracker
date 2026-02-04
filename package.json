@@ -15,7 +15,20 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "commands": []
+    "commands": [
+      {
+        "command": "ai-context-tracker.startDetector",
+        "title": "AI Context Tracker: Start Detector"
+      },
+      {
+        "command": "ai-context-tracker.stopDetector",
+        "title": "AI Context Tracker: Stop Detector"
+      },
+      {
+        "command": "ai-context-tracker.resetDetector",
+        "title": "AI Context Tracker: Reset Detector"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

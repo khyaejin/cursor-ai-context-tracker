@@ -1,48 +1,87 @@
 import * as vscode from 'vscode';
 import { CursorDB } from './cursor/cursorDB';
 import { AIContextHoverProvider } from './providers/hoverProvider';
+import { AIResponseDetector } from './detectors/aiResponseDetector';
+
+let aiResponseDetector: AIResponseDetector | null = null;
 
 export async function activate(context: vscode.ExtensionContext) {
-  console.log('[AI Context Tracker] POC Day 3 - Activating extension...');
+  console.log('[AI Context Tracker] Phase 1 MVP - Activating extension...');
 
   try {
-    console.log('[POC Day 3] Step 1: Registering Hover Provider...');
+    const cursorDB = new CursorDB();
+
+    console.log('[Phase 1] Step 1: Registering Hover Provider...');
     const hoverProvider = new AIContextHoverProvider();
-    
     const hoverDisposable = vscode.languages.registerHoverProvider(
       { scheme: 'file', pattern: '**/*.ts' },
       hoverProvider
     );
-    
     context.subscriptions.push(hoverDisposable);
-    console.log('[POC Day 3] ✅ Hover Provider registered for TypeScript files');
+    console.log('[Phase 1] ✅ Hover Provider registered');
 
-    console.log('[POC Day 3] Step 2: Testing Cursor DB (from Day 1-2)...');
-    const cursorDB = new CursorDB();
-    await cursorDB.initialize();
-    const composers = await cursorDB.getAllComposers();
-    cursorDB.close();
-    console.log(`[POC Day 3] ✅ Cursor DB still works: ${composers.length} composers`);
+    console.log('[Phase 1] Step 2: Starting AI Response Detector...');
+    aiResponseDetector = new AIResponseDetector(cursorDB);
+    aiResponseDetector.startPolling();
+    console.log('[Phase 1] ✅ AI Response Detector started (5s polling)');
 
-    vscode.window.showInformationMessage(
-      `[POC Day 3] ✅ Hover Provider 등록 완료! src/cursor/cursorDB.ts 파일을 열어서 코드에 마우스를 올려보세요.`
+    const stopDetectorCommand = vscode.commands.registerCommand(
+      'ai-context-tracker.stopDetector',
+      () => {
+        if (aiResponseDetector) {
+          aiResponseDetector.stopPolling();
+          vscode.window.showInformationMessage('AI Response Detector stopped');
+        }
+      }
     );
 
-    console.log('[POC Day 3] ========================================');
-    console.log('[POC Day 3] Hover Provider 테스트 준비 완료');
-    console.log('[POC Day 3] 📝 다음 작업:');
-    console.log('[POC Day 3]   1. src/cursor/cursorDB.ts 파일 열기');
-    console.log('[POC Day 3]   2. 1-10줄, 15-30줄, 50-80줄에 마우스 올리기');
-    console.log('[POC Day 3]   3. AI 생성 컨텍스트 Hover 확인');
-    console.log('[POC Day 3] ========================================');
+    const startDetectorCommand = vscode.commands.registerCommand(
+      'ai-context-tracker.startDetector',
+      () => {
+        if (aiResponseDetector) {
+          aiResponseDetector.startPolling();
+          vscode.window.showInformationMessage('AI Response Detector started');
+        }
+      }
+    );
+
+    const resetDetectorCommand = vscode.commands.registerCommand(
+      'ai-context-tracker.resetDetector',
+      () => {
+        if (aiResponseDetector) {
+          aiResponseDetector.resetProcessedBubbleId();
+          vscode.window.showInformationMessage('Detector reset - will check all responses again');
+        }
+      }
+    );
+
+    context.subscriptions.push(stopDetectorCommand);
+    context.subscriptions.push(startDetectorCommand);
+    context.subscriptions.push(resetDetectorCommand);
+
+    vscode.window.showInformationMessage(
+      '✅ AI Context Tracker 활성화! AI 응답을 자동으로 추적합니다.'
+    );
+
+    console.log('[Phase 1] ========================================');
+    console.log('[Phase 1] AI Context Tracker 활성화 완료');
+    console.log('[Phase 1] - Hover Provider: 활성');
+    console.log('[Phase 1] - AI Response Detector: 활성 (5s 간격)');
+    console.log('[Phase 1] - File Watcher: 활성 (500ms debounce)');
+    console.log('[Phase 1] ========================================');
 
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error('[POC Day 3] ❌ Error:', errorMsg);
-    vscode.window.showErrorMessage(`[POC Day 3] 오류 발생: ${errorMsg}`);
+    console.error('[Phase 1] ❌ Error:', errorMsg);
+    vscode.window.showErrorMessage(`[Phase 1] 오류 발생: ${errorMsg}`);
   }
 }
 
 export function deactivate() {
-  console.log('[AI Context Tracker] POC Day 3 - Deactivating extension');
+  console.log('[AI Context Tracker] Phase 1 - Deactivating extension');
+  
+  if (aiResponseDetector) {
+    aiResponseDetector.stopPolling();
+    aiResponseDetector = null;
+  }
 }
