@@ -1,0 +1,11 @@
+{
+  "byFile": {
+    "../../../package.json": [
+      "5db23c65a97892dac5d7d6275ce27d4a0dae7d1c"
+    ],
+    "../../../src/cursor/cursorDB.ts": [
+      "5db23c65a97892dac5d7d6275ce27d4a0dae7d1c"
+    ]
+  },
+  "updatedAt": 1770268610337
+}

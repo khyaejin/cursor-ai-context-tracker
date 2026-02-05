@@ -1,26 +1,36 @@
 import * as vscode from 'vscode';
 import { CursorDB } from './cursor/cursorDB';
+import { MetadataStore } from './store/metadataStore';
 import { AIContextHoverProvider } from './providers/hoverProvider';
 import { AIResponseDetector } from './detectors/aiResponseDetector';
 
 let aiResponseDetector: AIResponseDetector | null = null;
 
 export async function activate(context: vscode.ExtensionContext) {
-  console.log('[AI Context Tracker] Phase 1 MVP - Activating extension...');
+  console.log('[AI Context Tracker] Activating extension...');
+
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    console.warn('[AI Context Tracker] No workspace folder opened.');
+    return;
+  }
 
   try {
-    const cursorDB = new CursorDB();
+    const metadataStore = new MetadataStore(workspaceRoot);
+    metadataStore.ensureDir();
 
-    console.log('[Phase 1] Step 1: Registering Hover Provider...');
-    const hoverProvider = new AIContextHoverProvider();
+    console.log('[Phase 1] Step 1: Registering Hover Provider (.ai-context only)...');
+    const hoverProvider = new AIContextHoverProvider(metadataStore);
     const hoverDisposable = vscode.languages.registerHoverProvider(
-      { scheme: 'file', pattern: '**/*.ts' },
+      { scheme: 'file' },
       hoverProvider
     );
     context.subscriptions.push(hoverDisposable);
-    console.log('[Phase 1] ✅ Hover Provider registered');
+    console.log('[Phase 1] ✅ Hover Provider registered (all files, .ai-context only)');
 
-    console.log('[Phase 1] Step 2: Starting AI Response Detector...');
+    const cursorDB = new CursorDB();
+
+    console.log('[Phase 1] Step 2: Starting AI Response Detector (Cursor DB)...');
     aiResponseDetector = new AIResponseDetector(cursorDB);
     aiResponseDetector.startPolling();
     console.log('[Phase 1] ✅ AI Response Detector started (5s polling)');

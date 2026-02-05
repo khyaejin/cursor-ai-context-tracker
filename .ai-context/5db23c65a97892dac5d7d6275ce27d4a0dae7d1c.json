@@ -1,0 +1,24 @@
+{
+  "commitHash": "5db23c65a97892dac5d7d6275ce27d4a0dae7d1c",
+  "timestamp": 1770268610335,
+  "changes": [
+    {
+      "filePath": "../../../package.json",
+      "lineRanges": [
+        {
+          "start": 14,
+          "end": 14
+        }
+      ]
+    },
+    {
+      "filePath": "../../../src/cursor/cursorDB.ts",
+      "lineRanges": [
+        {
+          "start": 13,
+          "end": 23
+        }
+      ]
+    }
+  ]
+}
