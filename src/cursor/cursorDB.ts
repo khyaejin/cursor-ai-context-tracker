@@ -10,7 +10,17 @@ export class CursorDB {
   private db: any | null = null;
 
   constructor() {
-    const appDataPath = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    // 플랫폼별 경로 설정
+    let appDataPath: string;
+    if (process.platform === 'win32') {
+      appDataPath = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    } else if (process.platform === 'darwin') {
+      // macOS
+      appDataPath = path.join(os.homedir(), 'Library', 'Application Support');
+    } else {
+      // Linux
+      appDataPath = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+    }
     this.dbPath = path.join(appDataPath, 'Cursor', 'User', 'globalStorage', 'state.vscdb');
   }
 
