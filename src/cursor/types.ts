@@ -23,18 +23,26 @@ export interface AiContextEntry {
   /** 선택: prompt/thinking 등 (있으면 Hover에 표시) */
   prompt?: string;
   thinking?: string;
+  /** 선택: 토큰 수 (메타 정보용) */
+  token?: number;
   aiRefs?: { composerId: string; bubbleIds: string[]; time: number }[];
 }
 
+/** 기능 1-6: .ai-context/metadata.json 한 항목 (프롬프트-코드 연결) */
 export interface AICodeMetadata {
-  prompt: string;
-  aiResponse: string;
-  timestamp: number;
-  commitHash?: string;
-  filePath: string;
-  lineRanges: { start: number; end: number }[];
-  composerId: string;
   bubbleId: string;
+  composerId: string;
+  prompt: string;
+  thinking?: string;
+  /** 여러 파일 + 라인 범위 (by file, by line 검색용). 없으면 filePath+lineRanges 사용 */
+  files?: { filePath: string; lineRanges: { start: number; end: number }[] }[];
+  commitHash?: string;
+  timestamp: number;
+  tokens?: number;
+  /** 하위 호환: 단일 파일 시 filePath */
+  filePath?: string;
+  lineRanges?: { start: number; end: number }[];
+  aiResponse?: string;
   modelType?: string;
   userSelections?: { text: string; file?: string }[];
 }

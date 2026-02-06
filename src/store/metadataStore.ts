@@ -86,10 +86,17 @@ export class MetadataStore {
     const byFile: Record<string, string[]> = {};
     metadata.forEach((entry, index) => {
       byBubbleId[entry.bubbleId] = index;
-      if (entry.filePath) {
-        if (!byFile[entry.filePath]) byFile[entry.filePath] = [];
-        byFile[entry.filePath].push(entry.bubbleId);
-      }
+      const filePaths = entry.files?.length
+        ? entry.files.map((f) => f.filePath)
+        : entry.filePath
+          ? [entry.filePath]
+          : [];
+      filePaths.forEach((fp) => {
+        if (!fp) return;
+        const normalized = path.normalize(fp);
+        if (!byFile[normalized]) byFile[normalized] = [];
+        if (!byFile[normalized].includes(entry.bubbleId)) byFile[normalized].push(entry.bubbleId);
+      });
     });
     return {
       byBubbleId,
@@ -105,6 +112,7 @@ export class MetadataStore {
     fs.writeFileSync(this.metadataPath, JSON.stringify(list, null, 2), 'utf-8');
     const index = this.buildIndex(list);
     fs.writeFileSync(this.indexPath, JSON.stringify(index, null, 2), 'utf-8');
+    console.log('[MetadataStore] metadata.json에 항목 추가 완료:', this.metadataPath, '총 항목 수 =', list.length);
   }
 
   getMetadataByBubbleId(bubbleId: string): AICodeMetadata | null {
@@ -117,11 +125,27 @@ export class MetadataStore {
 
   getMetadataByFile(filePath: string): AICodeMetadata[] {
     const index = this.readIndex();
-    if (!index || !index.byFile[filePath]) return [];
+    if (!index) return [];
     const list = this.readMetadata();
-    return index.byFile[filePath]
+    const normalized = path.normalize(filePath);
+    const bubbleIds = index.byFile[normalized] ?? Object.keys(index.byFile).filter((k) => this.sameFile(k, filePath)).flatMap((k) => index.byFile[k] ?? []);
+    const unique = [...new Set(bubbleIds)];
+    return unique
       .map((id) => list[index.byBubbleId[id]])
       .filter(Boolean);
+  }
+
+  /** 기능 1-6: by file + line 검색 (Hover용) */
+  getMetadataByFileAndLine(filePath: string, lineNumber: number): AICodeMetadata[] {
+    const list = this.readMetadata();
+    return list.filter((entry) => {
+      const files = entry.files?.length ? entry.files : entry.filePath && entry.lineRanges ? [{ filePath: entry.filePath, lineRanges: entry.lineRanges }] : [];
+      return files.some(
+        (f) =>
+          this.sameFile(f.filePath, filePath) &&
+          f.lineRanges.some((r) => lineNumber >= r.start && lineNumber <= r.end)
+      );
+    });
   }
 
   // ---------- .ai-context 전용 (Hover/UI 단일 입력) ----------
