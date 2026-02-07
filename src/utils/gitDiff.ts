@@ -28,12 +28,33 @@ export async function getDiffLineRanges(
       );
       raw = stdout;
     } else {
-      const { stdout } = await execFileAsync(
-        'git',
-        ['diff', '--no-color', '-U0'],
-        { cwd: workspaceRoot, maxBuffer: 10 * 1024 * 1024 }
-      );
-      raw = stdout;
+      try {
+        // 기능 1-5: staged + unstaged 모두 포함
+        // - 일반 저장소: HEAD 기준으로 전체 변경사항 확인
+        const { stdout } = await execFileAsync(
+          'git',
+          ['diff', 'HEAD', '--no-color', '-U0'],
+          { cwd: workspaceRoot, maxBuffer: 10 * 1024 * 1024 }
+        );
+        raw = stdout;
+      } catch (innerErr) {
+        const msg = innerErr instanceof Error ? innerErr.message : String(innerErr);
+        // 초기 커밋이 없는 저장소에서는 HEAD가 없어서 에러 → working tree 기준 diff로 Fallback
+        if (msg.includes("ambiguous argument 'HEAD'") || msg.includes('bad revision \'HEAD\'')) {
+          console.warn(
+            '[gitDiff] HEAD 기준 diff 실패 (초기 커밋 없음으로 추정) → git diff로 Fallback:',
+            msg
+          );
+          const { stdout } = await execFileAsync(
+            'git',
+            ['diff', '--no-color', '-U0'],
+            { cwd: workspaceRoot, maxBuffer: 10 * 1024 * 1024 }
+          );
+          raw = stdout;
+        } else {
+          throw innerErr;
+        }
+      }
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -43,9 +64,25 @@ export async function getDiffLineRanges(
     throw err;
   }
 
-  if (!raw.trim()) return {};
+  if (!raw.trim()) {
+    console.log(
+      '[gitDiff] raw diff 비어 있음. workspaceRoot=',
+      workspaceRoot,
+      '| commitHash=',
+      options?.commitHash ?? '없음(git diff HEAD)'
+    );
+    return {};
+  }
 
   const files = parseDiff(raw);
+  console.log(
+    '[gitDiff] parse-diff 파일 수=',
+    files.length,
+    '| 요청 filePaths=',
+    options?.filePaths?.length ?? '없음',
+    '| raw 길이=',
+    raw.length
+  );
   const filePaths = options?.filePaths ? new Set(options.filePaths.map((p) => path.normalize(p))) : null;
   const result: LineRangesByFile = {};
 
@@ -55,6 +92,9 @@ export async function getDiffLineRanges(
 
     const relative = path.relative(workspaceRoot, filePath) || filePath;
     const normalized = path.normalize(relative).replace(/\\/g, '/');
+    // .ai-context 내부 파일은 AI 메타데이터용이므로 diff 대상으로 제외
+    if (normalized === '.ai-context' || normalized.startsWith('.ai-context/')) continue;
+
     if (filePaths && !filePaths.has(normalized) && !Array.from(filePaths).some((fp) => fp.endsWith(normalized) || normalized.endsWith(fp))) continue;
 
     const ranges: { start: number; end: number }[] = [];
@@ -72,6 +112,13 @@ export async function getDiffLineRanges(
     if (ranges.length > 0) {
       const merged = mergeAdjacentRanges(ranges);
       result[normalized] = merged;
+      // 디버그용: Git diff로 감지된 파일/라인 범위 로그
+      console.log(
+        '[gitDiff] Git diff에서 변경 감지:',
+        normalized,
+        '라인 범위 =',
+        merged.map((r) => `${r.start}-${r.end}`).join(', ')
+      );
     }
   }
 

@@ -37,7 +37,10 @@ export interface AICodeMetadata {
   /** 여러 파일 + 라인 범위 (by file, by line 검색용). 없으면 filePath+lineRanges 사용 */
   files?: { filePath: string; lineRanges: { start: number; end: number }[] }[];
   commitHash?: string;
+  /** 메타데이터 저장 시각 (ms) */
   timestamp: number;
+  /** 사람이 읽기 좋은 시각 문자열 (YYYY-MM-DD HH:MM:SS) */
+  timestampStr?: string;
   tokens?: number;
   /** 하위 호환: 단일 파일 시 filePath */
   filePath?: string;

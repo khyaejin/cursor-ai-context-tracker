@@ -40,7 +40,7 @@ export class AIContextHoverProvider implements vscode.HoverProvider {
     return this.createHoverFromContexts(contexts, relativePath, lineNumber);
   }
 
-  /** metadata.json 항목 기준 Hover (prompt, thinking 표시) */
+  /** metadata.json 항목 기준 Hover (prompt, thinking, 태그·액션) */
   private createHoverFromMetadata(
     entries: AICodeMetadata[],
     filePath: string,
@@ -53,7 +53,16 @@ export class AIContextHoverProvider implements vscode.HoverProvider {
       const entry = entries[i];
       if (i > 0) markdown.appendMarkdown('---\n\n');
 
-      markdown.appendMarkdown('### AI Context\n\n');
+      markdown.appendMarkdown('#### AI Context\n\n');
+
+      const fileCount = entry.files?.length ?? (entry.filePath ? 1 : 0);
+      const timeStr = new Date(entry.timestamp).toLocaleString('ko-KR', {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      markdown.appendMarkdown(`\` 파일 ${fileCount}개 \` \` ${timeStr} \`\n\n`);
 
       markdown.appendMarkdown('**프롬프트**\n\n');
       markdown.appendMarkdown(`> ${this.truncate(entry.prompt, PROMPT_PREVIEW_LEN)}\n\n`);
@@ -68,26 +77,14 @@ export class AIContextHoverProvider implements vscode.HoverProvider {
           .map((r) => (r.start === r.end ? `${r.start}` : `${r.start}-${r.end}`))
           .join(', ')
         : `${lineNumber}`;
-      const timeStr = new Date(entry.timestamp).toLocaleString('ko-KR', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
       const tokenStr = entry.tokens != null ? String(entry.tokens) : '–';
-
-      markdown.appendMarkdown('**메타** | ');
-      markdown.appendMarkdown(`파일: \`${filePath}\` | `);
-      markdown.appendMarkdown(`라인: ${lineRangeStr} | `);
-      markdown.appendMarkdown(`토큰: ${tokenStr} | `);
-      markdown.appendMarkdown(`시간: ${timeStr}\n\n`);
+      markdown.appendMarkdown('**메타** · ');
+      markdown.appendMarkdown(`\`${filePath}\` · 라인 ${lineRangeStr} · 토큰 ${tokenStr}\n\n`);
 
       const id = entry.commitHash ?? entry.bubbleId;
       const copyCmd = `command:ai-context-tracker.copyContext?${encodeURIComponent(JSON.stringify([id]))}`;
       const fullCmd = `command:ai-context-tracker.showFullContext?${encodeURIComponent(JSON.stringify([id]))}`;
-      markdown.appendMarkdown(`[전체 보기](${fullCmd}) `);
-      markdown.appendMarkdown(`[복사](${copyCmd})\n\n`);
+      markdown.appendMarkdown(`[📄 전체 보기](${fullCmd}) · [📋 복사](${copyCmd})\n\n`);
     }
 
     return new vscode.Hover(markdown);
@@ -144,16 +141,12 @@ export class AIContextHoverProvider implements vscode.HoverProvider {
       });
       const tokenStr = entry.token != null ? String(entry.token) : '–';
 
-      markdown.appendMarkdown('**메타** | ');
-      markdown.appendMarkdown(`파일: \`${filePath}\` | `);
-      markdown.appendMarkdown(`라인: ${lineRangeStr} | `);
-      markdown.appendMarkdown(`토큰: ${tokenStr} | `);
-      markdown.appendMarkdown(`시간: ${timeStr}\n\n`);
+      markdown.appendMarkdown('**메타** · ');
+      markdown.appendMarkdown(`\`${filePath}\` · 라인 ${lineRangeStr} · 토큰 ${tokenStr}\n\n`);
 
       const copyCmd = `command:ai-context-tracker.copyContext?${encodeURIComponent(JSON.stringify([entry.commitHash]))}`;
       const fullCmd = `command:ai-context-tracker.showFullContext?${encodeURIComponent(JSON.stringify([entry.commitHash]))}`;
-      markdown.appendMarkdown(`[전체 보기](${fullCmd}) `);
-      markdown.appendMarkdown(`[복사](${copyCmd})\n\n`);
+      markdown.appendMarkdown(`[📄 전체 보기](${fullCmd}) · [📋 복사](${copyCmd})\n\n`);
     }
 
     return new vscode.Hover(markdown);

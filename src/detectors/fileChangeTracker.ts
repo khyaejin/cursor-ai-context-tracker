@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 
-const RETENTION_MS = 30 * 1000; // 30초 메모리 유지 (AI active window)
-const WINDOW_SEC = 5; // AI 응답 시간 ±5초 매칭
-export const MATCH_WINDOW_MS = WINDOW_SEC * 1000;
+// 최대 10분간 파일 변경 이벤트를 유지 (AI 응답과의 매칭용)
+const RETENTION_MS = 10 * 60 * 1000;
+// AI 응답 이후 10분 동안의 변경을 해당 응답과 연결
+export const AFTER_WINDOW_MS = 10 * 60 * 1000;
 
 const EXCLUDE_SEGMENTS = ['node_modules', '.git', '.ai-context'];
 
@@ -39,11 +40,15 @@ export class FileChangeTracker {
     const record = (uri: vscode.Uri) => {
       const relative = path.relative(this.workspaceRoot, uri.fsPath);
       if (this.shouldExclude(relative)) return;
+      const ts = Date.now();
       this.events.push({
         filePath: relative.replace(/\\/g, '/'),
-        timestamp: Date.now(),
+        timestamp: ts,
       });
       this.pruneOld();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/09d079db-6984-4d31-8eb3-113ca1eb493d', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'fileChangeTracker.ts:record', message: '파일 변경 이벤트 기록', data: { workspaceRoot: this.workspaceRoot, filePath: relative.replace(/\\/g, '/'), timestamp: ts, eventsCount: this.events.length }, timestamp: Date.now(), sessionId: 'debug-session', hypothesisId: 'H1' }) }).catch(() => {});
+      // #endregion
     };
 
     this.watcher.onDidChange(record);
@@ -73,16 +78,27 @@ export class FileChangeTracker {
   }
 
   /**
-   * AI 응답 시간 ±5초(또는 지정 ms) 구간에 변경된 파일 경로 목록 (중복 제거)
+   * AI 응답 시각 이후 windowMs(기본 10분) 동안 변경된 파일 경로 목록 (중복 제거)
+   * - "파일 수정이 있으면 → 가장 가까운 AI 응답" 패턴에 맞추기 위해,
+   *   AI 응답 이후 넉넉한 시간 동안의 변경을 해당 응답과 연결하는 용도.
    */
-  getFilePathsInWindow(aiResponseTime: number, windowMs: number = MATCH_WINDOW_MS): string[] {
+  getFilePathsAfter(aiResponseTime: number, windowMs: number = AFTER_WINDOW_MS): string[] {
     this.pruneOld();
-    const start = aiResponseTime - windowMs;
+    const start = aiResponseTime;
     const end = aiResponseTime + windowMs;
+    const now = Date.now();
     const set = new Set<string>();
+    const inWindow: number[] = [];
     for (const e of this.events) {
-      if (e.timestamp >= start && e.timestamp <= end) set.add(e.filePath);
+      if (e.timestamp >= start && e.timestamp <= end) {
+        set.add(e.filePath);
+        inWindow.push(e.timestamp);
+      }
     }
-    return Array.from(set);
+    const result = Array.from(set);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/09d079db-6984-4d31-8eb3-113ca1eb493d', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'fileChangeTracker.ts:getFilePathsAfter', message: '윈도우 내 파일 목록 조회', data: { workspaceRoot: this.workspaceRoot, aiResponseTime, windowMs, start, end, now, eventsTotal: this.events.length, inWindowCount: result.length, resultSample: result.slice(0, 5), eventTimestampsSample: inWindow.slice(0, 5) }, timestamp: Date.now(), sessionId: 'debug-session', hypothesisId: 'H2,H4' }) }).catch(() => {});
+    // #endregion
+    return result;
   }
 }

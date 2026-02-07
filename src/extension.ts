@@ -6,10 +6,14 @@ import { AIContextHoverProvider } from './providers/hoverProvider';
 import { AIResponseDetector } from './detectors/aiResponseDetector';
 import { FileChangeTracker } from './detectors/fileChangeTracker';
 import { runAiContextPipeline } from './detectors/aiContextPipeline';
+import { getFullContextWebviewContent, FullContextData } from './webview/fullContextView';
 
 let aiResponseDetector: AIResponseDetector | null = null;
 let fileChangeTracker: FileChangeTracker | null = null;
 let initialized = false;
+let activeBubbleId: string | null = null;
+let activeBubbleStartedAt: number | null = null;
+let activeInterval: NodeJS.Timeout | null = null;
 
 /** 현재 열린 워크스페이스(있다면)에 대해 확장 코어를 초기화 */
 async function initializeForWorkspace(context: vscode.ExtensionContext): Promise<void> {
@@ -60,43 +64,135 @@ async function initializeForWorkspace(context: vscode.ExtensionContext): Promise
     aiResponseDetector = new AIResponseDetector(cursorDB, {
       onNewAIResponse: async (bubble: Bubble) => {
         const root = cachedWorkspaceRoot;
-        console.log('[AI Context Tracker] onNewAIResponse 호출: bubble=', bubble.bubbleId?.substring(0, 8), 'root=', !!root, 'tracker=', !!fileChangeTracker);
+        console.log(
+          '[AI Context Tracker] onNewAIResponse 호출: bubble=',
+          bubble.bubbleId?.substring(0, 8),
+          'root=',
+          !!root,
+          'tracker=',
+          !!fileChangeTracker
+        );
 
         const tracker = fileChangeTracker;
-        const runPipeline = root && tracker;
-        if (runPipeline) {
-          try {
-            const ok = await runAiContextPipeline(root, cursorDB, metadataStore, tracker, bubble);
-            if (ok) {
-              console.log('[AI Context Tracker] 파이프라인 성공 → Git 커밋 + metadata 저장 완료');
-              return;
-            }
-            console.log('[AI Context Tracker] 파이프라인이 false를 반환 → Fallback 저장으로 전환');
-          } catch (e) {
-            console.warn('[AI Context Tracker] 파이프라인 실행 중 예외 → Fallback 저장 사용:', e instanceof Error ? e.message : e);
-          }
-        } else {
-          console.log('[AI Context Tracker] workspaceRoot 또는 FileChangeTracker 없음 → Fallback 저장만 수행');
-        }
 
-        const editor = vscode.window.activeTextEditor;
-        const relativePath = editor && root ? vscode.workspace.asRelativePath(editor.document.uri) : '';
-        const start = editor ? editor.selection.start.line + 1 : 1;
-        const end = editor ? editor.selection.end.line + 1 : 1;
-        const files = relativePath
-          ? [{ filePath: relativePath, lineRanges: [{ start, end }] }]
-          : [{ filePath: '(현재 파일 없음)', lineRanges: [{ start: 1, end: 1 }] }];
-        try {
-          const { saveMetadataFromCursorDB } = await import('./store/saveMetadataFromCursor');
-          await saveMetadataFromCursorDB(cursorDB, metadataStore, {
-            composerId: bubble.composerId,
-            bubbleId: bubble.bubbleId,
-            files,
-          });
-          console.log('[AI Context Tracker] metadata.json Fallback 저장 완료: bubble=', bubble.bubbleId.substring(0, 8));
-        } catch (e) {
-          console.error('[AI Context Tracker] Fallback 저장 실패:', e instanceof Error ? e.message : e, e instanceof Error ? e.stack : '');
+        // 새 bubble이 오면 이전 bubble에 대한 주기적 작업 중단
+        if (activeBubbleId && activeBubbleId !== bubble.bubbleId && activeInterval) {
+          clearInterval(activeInterval);
+          activeInterval = null;
         }
+        activeBubbleId = bubble.bubbleId;
+        activeBubbleStartedAt = Date.now();
+
+        const runOnce = async (label: string) => {
+          if (!root || !tracker) {
+            console.log(
+              '[AI Context Tracker]',
+              label,
+              '에서 workspaceRoot 또는 FileChangeTracker 없음 → Fallback 저장만 수행'
+            );
+          } else {
+            try {
+              const ok = await runAiContextPipeline(
+                root,
+                cursorDB,
+                metadataStore,
+                tracker,
+                bubble,
+                {
+                  onAiContextBranchFirstCreated: (branchName) => {
+                    vscode.window.showInformationMessage(
+                      `AI Context Tracker: \`${branchName}\` 브랜치를 생성했습니다. (main과 독립된 orphan 브랜치)`
+                    );
+                  },
+                }
+              );
+              if (ok) {
+                console.log(
+                  '[AI Context Tracker]',
+                  label,
+                  '파이프라인 성공 → Git 커밋 + metadata 저장 완료 (다른 파일 감지 시 계속 추가)'
+                );
+                // 성공해도 30초 반복은 유지 → 다른 파일이 감지되면 계속 추가
+                return;
+              }
+              console.log(
+                '[AI Context Tracker]',
+                label,
+                '파이프라인이 false를 반환 → Fallback 저장으로 전환'
+              );
+            } catch (e) {
+              console.warn(
+                '[AI Context Tracker]',
+                label,
+                '파이프라인 실행 중 예외 → Fallback 저장 사용:',
+                e instanceof Error ? e.message : e
+              );
+            }
+          }
+
+          const editor = vscode.window.activeTextEditor;
+          const relativePath =
+            editor && root ? vscode.workspace.asRelativePath(editor.document.uri) : '';
+          const start = editor ? editor.selection.start.line + 1 : 1;
+          const end = editor ? editor.selection.end.line + 1 : 1;
+          const usePath =
+            relativePath && !relativePath.startsWith('.ai-context')
+              ? relativePath
+              : '(현재 파일 없음)';
+          const files =
+            usePath && usePath !== '(현재 파일 없음)'
+              ? [{ filePath: usePath, lineRanges: [{ start, end }] }]
+              : [{ filePath: '(현재 파일 없음)', lineRanges: [{ start: 1, end: 1 }] }];
+          try {
+            const { saveMetadataFromCursorDB } = await import('./store/saveMetadataFromCursor');
+            await saveMetadataFromCursorDB(cursorDB, metadataStore, {
+              composerId: bubble.composerId,
+              bubbleId: bubble.bubbleId,
+              files,
+            });
+            console.log(
+              '[AI Context Tracker]',
+              label,
+              'metadata.json Fallback 저장 완료: bubble=',
+              bubble.bubbleId.substring(0, 8)
+            );
+          } catch (e) {
+            console.error(
+              '[AI Context Tracker]',
+              label,
+              'Fallback 저장 실패:',
+              e instanceof Error ? e.message : e,
+              e instanceof Error ? e.stack : ''
+            );
+          }
+        };
+
+        // 즉시 한 번 실행
+        runOnce('T+0s').catch((e) =>
+          console.error('[AI Context Tracker] T+0s runOnce 오류:', e)
+        );
+
+        // 이후 30초마다, 최대 10분 동안 반복 실행
+        if (activeInterval) {
+          clearInterval(activeInterval);
+        }
+        activeInterval = setInterval(() => {
+          if (!activeBubbleId || activeBubbleId !== bubble.bubbleId) {
+            // 새로운 bubble이 감지되었거나 더 이상 활성 bubble이 아님
+            clearInterval(activeInterval!);
+            activeInterval = null;
+            return;
+          }
+          if (activeBubbleStartedAt && Date.now() - activeBubbleStartedAt > 10 * 60 * 1000) {
+            // 10분이 지나면 중단
+            clearInterval(activeInterval!);
+            activeInterval = null;
+            return;
+          }
+          runOnce('T+30s-loop').catch((e) =>
+            console.error('[AI Context Tracker] T+30s-loop runOnce 오류:', e)
+          );
+        }, 30 * 1000);
       },
     });
     aiResponseDetector.startPolling();
@@ -138,31 +234,35 @@ async function initializeForWorkspace(context: vscode.ExtensionContext): Promise
 
     const showFullContextCommand = vscode.commands.registerCommand(
       'ai-context-tracker.showFullContext',
-      async (id: string) => {
+      async (idArg: string | unknown) => {
+        const id = typeof idArg === 'string' ? idArg : Array.isArray(idArg) ? idArg[0] : undefined;
+        if (!id || typeof id !== 'string') return;
         const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!root) return;
         const store = new MetadataStore(root);
         const meta = store.getMetadataByBubbleId(id);
         if (meta) {
-          const lines: string[] = [
-            '# AI Context (전체)',
-            '',
-            `**Bubble:** \`${id.substring(0, 8)}\` · ${new Date(meta.timestamp).toLocaleString('ko-KR')}`,
-            '',
-            '## 프롬프트',
-            meta.prompt || '(없음)',
-            '',
-            '## AI Thinking',
-            meta.thinking || '(없음)',
-            '',
-            '## 메타',
-            `파일: ${meta.files?.map((f) => f.filePath).join(', ') ?? meta.filePath ?? ''}`,
-          ];
-          const doc = await vscode.workspace.openTextDocument({
-            content: lines.join('\n'),
-            language: 'markdown',
+          const panel = vscode.window.createWebviewPanel(
+            'aiContextFullView',
+            `AI Context · ${id.substring(0, 8)}`,
+            vscode.ViewColumn.Beside,
+            { enableScripts: true }
+          );
+          const data: FullContextData = {
+            id,
+            prompt: meta.prompt ?? '',
+            thinking: meta.thinking ?? '',
+            timestamp: meta.timestamp,
+            files: meta.files ?? (meta.filePath && meta.lineRanges ? [{ filePath: meta.filePath, lineRanges: meta.lineRanges }] : []),
+            timestampStr: meta.timestampStr ?? new Date(meta.timestamp).toLocaleString('ko-KR'),
+          };
+          panel.webview.html = getFullContextWebviewContent(data);
+          panel.webview.onDidReceiveMessage(async (msg) => {
+            if (msg.type === 'copy' && typeof msg.text === 'string') {
+              await vscode.env.clipboard.writeText(msg.text);
+              vscode.window.showInformationMessage('클립보드에 복사했습니다.');
+            }
           });
-          await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.Beside });
           return;
         }
         const entry = store.readContextFile(id);
@@ -170,31 +270,35 @@ async function initializeForWorkspace(context: vscode.ExtensionContext): Promise
           vscode.window.showWarningMessage('해당 Context를 찾을 수 없습니다.');
           return;
         }
-        const lines: string[] = [
-          '# AI Context (전체)',
-          '',
-          `**Context:** \`${id.substring(0, 7)}\` · ${new Date(entry.timestamp).toLocaleString('ko-KR')}`,
-          '',
-          '## 프롬프트',
-          entry.prompt || '(없음)',
-          '',
-          '## AI Thinking',
-          entry.thinking || '(없음)',
-          '',
-          '## 메타',
-          `파일: ${entry.changes.map((c) => c.filePath).join(', ')}`,
-        ];
-        const doc = await vscode.workspace.openTextDocument({
-          content: lines.join('\n'),
-          language: 'markdown',
+        const panel = vscode.window.createWebviewPanel(
+          'aiContextFullView',
+          `AI Context · ${id.substring(0, 7)}`,
+          vscode.ViewColumn.Beside,
+          { enableScripts: true }
+        );
+        const data: FullContextData = {
+          id,
+          prompt: entry.prompt ?? '',
+          thinking: entry.thinking ?? '',
+          timestamp: entry.timestamp,
+          files: entry.changes.map((c) => ({ filePath: c.filePath, lineRanges: c.lineRanges })),
+          timestampStr: new Date(entry.timestamp).toLocaleString('ko-KR'),
+        };
+        panel.webview.html = getFullContextWebviewContent(data);
+        panel.webview.onDidReceiveMessage(async (msg) => {
+          if (msg.type === 'copy' && typeof msg.text === 'string') {
+            await vscode.env.clipboard.writeText(msg.text);
+            vscode.window.showInformationMessage('클립보드에 복사했습니다.');
+          }
         });
-        await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.Beside });
       }
     );
 
     const copyContextCommand = vscode.commands.registerCommand(
       'ai-context-tracker.copyContext',
-      async (id: string) => {
+      async (idArg: string | unknown) => {
+        const id = typeof idArg === 'string' ? idArg : Array.isArray(idArg) ? idArg[0] : undefined;
+        if (!id || typeof id !== 'string') return;
         const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!root) return;
         const store = new MetadataStore(root);

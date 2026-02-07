@@ -43,14 +43,35 @@ export async function saveMetadataFromCursorDB(
     if (didOpen) cursorDB.close();
   }
 
+  // 실제 코드 파일 정보가 없으면(placeholder만 있는 경우) 메타데이터를 추가하지 않음
+  const effectiveFiles =
+    files?.filter(
+      (f) => f.filePath && f.filePath !== '(현재 파일 없음)' && !f.filePath.startsWith('.ai-context/')
+    ) ?? [];
+  if (!effectiveFiles.length) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/09d079db-6984-4d31-8eb3-113ca1eb493d', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'saveMetadataFromCursor.ts:skip', message: 'effectiveFiles 없음으로 스킵', data: { bubbleId: bubbleId.substring(0, 8), filesLength: files?.length ?? 0, filesSample: (files ?? []).slice(0, 3).map((f) => f.filePath) }, timestamp: Date.now(), sessionId: 'debug-session', hypothesisId: 'H5' }) }).catch(() => {});
+    // #endregion
+    console.log(
+      '[saveMetadataFromCursorDB] files 정보가 없어 이 bubble에 대한 메타데이터를 추가하지 않습니다. bubble=',
+      bubbleId.substring(0, 8)
+    );
+    return;
+  }
+
+  const now = new Date();
+  const timestampMs = now.getTime();
+  const timestampStr = now.toISOString().slice(0, 19).replace('T', ' ');
+
   const entry: AICodeMetadata = {
     bubbleId,
     composerId,
     prompt: prompt || '(프롬프트 없음)',
     thinking: thinking || '(응답 없음)',
-    files,
+    files: effectiveFiles,
     commitHash,
-    timestamp: Date.now(),
+    timestamp: timestampMs,
+    timestampStr,
     tokens,
   };
   const metaPath = metadataStore.getMetadataPath();
@@ -65,5 +86,5 @@ export async function saveMetadataFromCursorDB(
     '[saveMetadataFromCursorDB] thinking (앞 200자):',
     preview(entry.thinking ?? '(응답 없음)', 200)
   );
-  metadataStore.appendMetadata(entry);
+  metadataStore.upsertMetadata(entry);
 }

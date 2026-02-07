@@ -115,6 +115,55 @@ export class MetadataStore {
     console.log('[MetadataStore] metadata.json에 항목 추가 완료:', this.metadataPath, '총 항목 수 =', list.length);
   }
 
+  /** bubbleId 기준으로 metadata를 upsert (파일/생각 등 정보를 점진적으로 보강) */
+  upsertMetadata(entry: AICodeMetadata): void {
+    this.ensureDir();
+    const list = this.readMetadata();
+    const existingIndex = list.findIndex((e) => e.bubbleId === entry.bubbleId);
+
+    if (existingIndex === -1) {
+      list.push(entry);
+    } else {
+      const existing = list[existingIndex];
+
+      // thinking: 기존에 값이 있는데 새 값이 "(응답 없음)"이면 기존 유지, 아니면 새 값 사용
+      const mergedThinking =
+        existing.thinking && existing.thinking !== '(응답 없음)' && entry.thinking === '(응답 없음)'
+          ? existing.thinking
+          : entry.thinking ?? existing.thinking;
+
+      // files: 기존 + 새 files 병합. 같은 filePath는 한 번만 유지 (중복 추가 금지)
+      const existingFiles =
+        existing.files?.length
+          ? existing.files
+          : existing.filePath && existing.lineRanges
+            ? [{ filePath: existing.filePath, lineRanges: existing.lineRanges }]
+            : [];
+      const existingPaths = new Set(
+        existingFiles.map((f) => f.filePath).filter(Boolean)
+      );
+      const newFiles = (entry.files ?? []).filter(
+        (f) =>
+          f.filePath &&
+          !f.filePath.startsWith('.ai-context/') &&
+          !existingPaths.has(f.filePath)
+      );
+      const mergedFiles = [...existingFiles, ...newFiles];
+
+      list[existingIndex] = {
+        ...existing,
+        ...entry,
+        thinking: mergedThinking,
+        files: mergedFiles,
+      };
+    }
+
+    fs.writeFileSync(this.metadataPath, JSON.stringify(list, null, 2), 'utf-8');
+    const index = this.buildIndex(list);
+    fs.writeFileSync(this.indexPath, JSON.stringify(index, null, 2), 'utf-8');
+    console.log('[MetadataStore] metadata.json upsert 완료:', this.metadataPath, '총 항목 수 =', list.length);
+  }
+
   getMetadataByBubbleId(bubbleId: string): AICodeMetadata | null {
     const index = this.readIndex();
     if (!index || index.byBubbleId[bubbleId] === undefined) return null;

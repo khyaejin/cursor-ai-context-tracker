@@ -21,26 +21,48 @@ export async function getAiContextBranchName(workspaceRoot: string): Promise<str
  * ai-context-{username} 브랜치로 전환
  * - 이미 있으면 checkout
  * - 없으면 orphan 생성 후 reset (히스토리 없음)
+ * - 반환: { branchName, created } (created = 이번에 새로 만든 경우)
  */
-export async function ensureAiContextBranch(workspaceRoot: string): Promise<string> {
+export async function ensureAiContextBranch(workspaceRoot: string): Promise<{ branchName: string; created: boolean }> {
   const git = simpleGit(workspaceRoot);
   const branchName = await getAiContextBranchName(workspaceRoot);
 
-  const current = await git.revparse(['--abbrev-ref', 'HEAD']);
-  const currentBranch = current.trim();
-  if (currentBranch === branchName) return branchName;
+  let currentBranch: string | null = null;
+  try {
+    const current = await git.revparse(['--abbrev-ref', 'HEAD']);
+    currentBranch = current.trim();
+  } catch (e) {
+    // 초기 커밋이 없는 저장소 등에서 HEAD가 없을 수 있음
+    console.warn(
+      '[AiContextGit] 현재 브랜치 이름을 가져오지 못했습니다 (초기 커밋 없음 가능성):',
+      e instanceof Error ? e.message : e
+    );
+  }
 
-  savedBranch = currentBranch;
+  if (currentBranch === branchName) return { branchName, created: false };
+
+  // 현재 브랜치가 유효한 경우에만 복귀용으로 저장
+  if (currentBranch) {
+    savedBranch = currentBranch;
+  }
 
   const branches = await git.branchLocal();
   if (branches.all.includes(branchName)) {
     await git.checkout(branchName);
-    return branchName;
+    return { branchName, created: false };
   }
 
   await git.checkout(['--orphan', branchName]);
-  await git.reset(['HEAD']);
-  return branchName;
+  try {
+    // 일부 환경 / 초기 커밋 없음에서는 HEAD가 없어 reset이 실패할 수 있음 → 무시
+    await git.reset(['HEAD']);
+  } catch (e) {
+    console.warn(
+      '[AiContextGit] HEAD 기준 reset 실패 (새 저장소 또는 orphan 브랜치 초기 상태로 추정):',
+      e instanceof Error ? e.message : e
+    );
+  }
+  return { branchName, created: true };
 }
 
 /** 원래 브랜치로 복귀 */
